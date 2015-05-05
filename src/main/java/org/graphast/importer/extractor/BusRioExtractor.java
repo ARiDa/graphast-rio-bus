@@ -3,107 +3,218 @@ package org.graphast.importer.extractor;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
-import org.graphast.util.DistanceUtils;
 import org.graphast.model.EdgeImpl;
 import org.graphast.model.Graph;
 import org.graphast.model.GraphImpl;
 import org.graphast.model.NodeImpl;
+import org.graphast.util.DistanceUtils;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.ResultSetExtractor;
 
 public class BusRioExtractor implements ResultSetExtractor<Object> {
 
-	public Object extractData(ResultSet rs) throws SQLException,
-			DataAccessException {
-		
-		
-		//TODO Verificar o tipo do currentNode e currentSequence;
-		
+	public Object extractData(ResultSet rs) throws SQLException, DataAccessException {
+
 		Graph rioNetwork = new GraphImpl("/home/gustavolgcr/rioBusGraph");
-		
-		NodeImpl currentNode;
-		NodeImpl nextNode;
-		
-		List<NodeImpl> currentNodeList = new ArrayList<NodeImpl>();
-		List<NodeImpl> nextNodeList = new ArrayList<NodeImpl>();
-		
-		List<Integer> currentSequencia = new ArrayList<Integer>();
-		List<Integer> nextSequencia = new ArrayList<Integer>();
+
+		Map<List<Double>, Integer> currentSequence = new HashMap<List<Double>, Integer>();
+		Map<List<Double>, Integer> nextSequence = new HashMap<List<Double>, Integer>();
 
 		if(rs.next()){
-			
-			currentNode = new NodeImpl(rs.getInt("latitude"), rs.getInt("longitude"));
-			currentNodeList.add(currentNode);
-			
-			currentSequencia.add(rs.getInt("sequencia"));
-			
+
+			List<Double> coordinates = new ArrayList<Double>();
+
+			coordinates.add(rs.getDouble("latitude"));
+			coordinates.add(rs.getDouble("longitude"));
+
+			currentSequence.put(coordinates, rs.getInt("sequencia"));
+
 		}
-		
-		
+
+		if(rs.next()){
+
+			if(!currentSequence.containsValue(rs.getInt("sequencia"))){
+
+				List<Double> coordinates = new ArrayList<Double>();
+
+				coordinates.add(rs.getDouble("latitude"));
+				coordinates.add(rs.getDouble("longitude"));
+
+				nextSequence.put(coordinates, rs.getInt("sequencia"));
+
+			} else {
+
+				rs.previous();
+
+			}
+
+		}
+
 		while(rs.next()) {
 
-			if(rs.getInt("sequencia")==currentSequencia.get(0)){
-				
-				currentSequencia.add(rs.getInt("sequencia"));
-				
-				currentNode = new NodeImpl(rs.getInt("latitude"), rs.getInt("longitude"));
-				currentNodeList.add(currentNode);
-				
-			} else {
-				
-				
-				nextSequencia.add(rs.getInt("sequencia"));
-				
-				nextNode = new NodeImpl(rs.getInt("latitude"), rs.getInt("longitude"));
-				nextNodeList.add(nextNode);
-				
+			if(currentSequence.containsValue(rs.getInt("sequencia"))){
+
+				List<Double> coordinates = new ArrayList<Double>();
+
+				coordinates.add(rs.getDouble("latitude"));
+				coordinates.add(rs.getDouble("longitude"));
+
+				currentSequence.put(coordinates, rs.getInt("sequencia"));
+
 			}
-			
-			if(rs.getInt("sequencia")!=currentSequencia.get(0) && rs.getInt("sequencia")!=nextSequencia.get(0)){
-				
+
+			if(nextSequence.containsValue(rs.getInt("sequencia")) || nextSequence.isEmpty()){
+
+				List<Double> coordinates = new ArrayList<Double>();
+
+				coordinates.add(rs.getDouble("latitude"));
+				coordinates.add(rs.getDouble("longitude"));
+
+				nextSequence.put(coordinates, rs.getInt("sequencia"));
+
+			}
+
+			if(!currentSequence.containsValue(rs.getInt("sequencia")) && 
+					!nextSequence.containsValue(rs.getInt("sequencia"))){
+
 				double distance = Double.MAX_VALUE;
 				NodeImpl nodeFrom;
 				NodeImpl nodeTo=null;
-				
-				for(NodeImpl current : currentNodeList){
-					
-					nodeFrom = current;
-					rioNetwork.addNode(nodeFrom);
-					
-					for(NodeImpl next : nextNodeList){
-						
-						if(DistanceUtils.distanceLatLong(current, next) < distance){
-							distance = DistanceUtils.distanceLatLong(current, next);
-							nodeTo = next;
-						}
-						
+				NodeImpl verificationNode;
+
+				for(Map.Entry<List<Double>, Integer> currentSequenceEntry : currentSequence.entrySet()){
+
+					distance = Double.MAX_VALUE;
+
+					nodeFrom = new NodeImpl(currentSequenceEntry.getKey().get(0), currentSequenceEntry.getKey().get(1));
+
+					if(rioNetwork.getNodeId(nodeFrom.getLatitude(), nodeFrom.getLongitude())==null) {
+						rioNetwork.addNode(nodeFrom);
+						System.out.println("Node FROM added:");
+						System.out.println("\t" + nodeFrom.toString());
+					} else {
+
+						nodeFrom = (NodeImpl)rioNetwork.getNode(rioNetwork.getNodeId(nodeFrom.getLatitude(), nodeFrom.getLongitude()));
+
 					}
-					
+
+					for(Map.Entry<List<Double>, Integer> nextSequenceEntry : nextSequence.entrySet()) {
+
+						verificationNode = new NodeImpl(nextSequenceEntry.getKey().get(0), nextSequenceEntry.getKey().get(1));
+
+						if(DistanceUtils.distanceLatLong(nodeFrom, verificationNode) < distance) {
+							nodeTo = verificationNode;
+							distance = DistanceUtils.distanceLatLong(nodeFrom, verificationNode);
+						}
+
+					}
+
+					if(rioNetwork.getNodeId(nodeTo.getLatitude(), nodeTo.getLongitude())==null) {
+						rioNetwork.addNode(nodeTo);
+						System.out.println("Node TO added:");
+						System.out.println("\t" + nodeTo.toString());
+					} else{
+						nodeTo = (NodeImpl)rioNetwork.getNode(rioNetwork.getNodeId(nodeTo.getLatitude(), nodeTo.getLongitude()));
+
+					}
+
+
+
 					EdgeImpl edge = new EdgeImpl(nodeFrom.getId(), nodeTo.getId(), (int)distance);
 					rioNetwork.addEdge(edge);
-					
+
 				}
-				
-				rs.previous();
-			
-				currentSequencia = nextSequencia;
-				nextSequencia = new ArrayList<Integer>();
-				
+
+				currentSequence.clear();
+				currentSequence.putAll(nextSequence);
+				nextSequence.clear();
+
+				List<Double> coordinates = new ArrayList<Double>();
+
+				coordinates.add(rs.getDouble("latitude"));
+				coordinates.add(rs.getDouble("longitude"));
+
+				nextSequence.put(coordinates, rs.getInt("sequencia"));
+
 			}
-			
+
 		}
-		
-		for(int current : currentSequencia){
-			for(int next : nextSequencia){
-				
-				//verificar o mais proximo
-				//criar no e aresta
-				
+
+		double distance = Double.MAX_VALUE;
+		NodeImpl nodeFrom;
+		NodeImpl nodeTo=null;
+		NodeImpl verificationNode;
+
+		for(Map.Entry<List<Double>, Integer> currentSequenceEntry : currentSequence.entrySet()){
+
+			distance = Double.MAX_VALUE;
+
+			nodeFrom = new NodeImpl(currentSequenceEntry.getKey().get(0), currentSequenceEntry.getKey().get(1));
+
+			if(rioNetwork.getNodeId(nodeFrom.getLatitude(), nodeFrom.getLongitude())==null) {
+
+				rioNetwork.addNode(nodeFrom);
+				System.out.println("Node FROM added:");
+				System.out.println("\t" + nodeFrom.toString());
+
+			} else {
+
+				nodeFrom = (NodeImpl)rioNetwork.getNode(rioNetwork.getNodeId(nodeFrom.getLatitude(), nodeFrom.getLongitude()));
+
 			}
+
+			for(Map.Entry<List<Double>, Integer> nextSequenceEntry : nextSequence.entrySet()) {
+
+				verificationNode = new NodeImpl(nextSequenceEntry.getKey().get(0), nextSequenceEntry.getKey().get(1));
+
+				if(DistanceUtils.distanceLatLong(nodeFrom, verificationNode) < distance) {
+					nodeTo = verificationNode;
+					distance = DistanceUtils.distanceLatLong(nodeFrom, verificationNode);
+				}
+
+			}
+
+			if(rioNetwork.getNodeId(nodeTo.getLatitude(), nodeTo.getLongitude())==null) {
+
+				rioNetwork.addNode(nodeTo);
+				System.out.println("Node TO added:");
+				System.out.println("\t" + nodeTo.toString());
+
+			} else{
+				nodeTo = (NodeImpl)rioNetwork.getNode(rioNetwork.getNodeId(nodeTo.getLatitude(), nodeTo.getLongitude()));
+
+			}
+
+			EdgeImpl edge = new EdgeImpl(nodeFrom.getId(), nodeTo.getId(), (int)distance);
+			rioNetwork.addEdge(edge);
+
 		}
-		
+
+		currentSequence.clear();
+		currentSequence.putAll(nextSequence);
+		nextSequence.clear();
+
+		for(Map.Entry<List<Double>, Integer> currentSequenceEntry : currentSequence.entrySet()){
+			nodeFrom = new NodeImpl(currentSequenceEntry.getKey().get(0), currentSequenceEntry.getKey().get(1));
+
+			if(rioNetwork.getNodeId(nodeFrom.getLatitude(), nodeFrom.getLongitude())==null) {
+
+				rioNetwork.addNode(nodeFrom);
+				System.out.println("Node FROM added:");
+				System.out.println("\t" + nodeFrom.toString());
+
+			} else {
+
+				nodeFrom = (NodeImpl)rioNetwork.getNode(rioNetwork.getNodeId(nodeFrom.getLatitude(), nodeFrom.getLongitude()));
+
+			}
+
+		}
+
 		return rioNetwork;
 
 	}
